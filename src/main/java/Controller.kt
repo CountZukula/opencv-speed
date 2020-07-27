@@ -7,12 +7,12 @@ import javafx.scene.image.ImageView
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.JavaFXFrameConverter
 import org.bytedeco.javacv.OpenCVFrameConverter
+import org.bytedeco.opencv.global.opencv_core.CV_8UC1
+import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.opencv_core.Mat
-import org.bytedeco.opencv.opencv_videoio.VideoCapture
-import org.opencv.videoio.*
-import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.TimeUnit
+import javax.swing.Spring.height
+
 
 class Controller {
 
@@ -23,6 +23,9 @@ class Controller {
     @FXML
     private lateinit var button: Button
 
+    @FXML
+    private lateinit var toggleGrey: Button
+
     // the FXML image view
     @FXML
     private lateinit var currentFrame: ImageView
@@ -31,6 +34,9 @@ class Controller {
     private var timer: ScheduledExecutorService? = null
 
     private val cameraUri = "http://192.168.178.111:2222"
+
+    // toggle to show color or gray image
+    private var showGrayImage = false
 
     // fps of the stream
     private val fps = 30
@@ -62,36 +68,52 @@ class Controller {
 
         // CanvasFrame, FrameGrabber, and FrameRecorder use Frame objects to communicate image data.
         // We need a FrameConverter to interface with other APIs (Android, Java 2D, JavaFX, Tesseract, OpenCV, etc).
-        val converter: OpenCVFrameConverter.ToMat = OpenCVFrameConverter.ToMat()
-        val converter2 = JavaFXFrameConverter()
+        val converter = JavaFXFrameConverter()
+        val converterCV = OpenCVFrameConverter.ToMat()
 
+        // print some info
         grabber.apply {
+            println("uri: $cameraUri")
             println("framerate: ${this.videoFrameRate}")
             println("has video: ${this.hasVideo()}")
             println("has audio: ${this.hasAudio()}")
             println("image height: $imageHeight")
-            println("image wideth: $imageWidth")
+            println("image width: $imageWidth")
+
+            // change the image frame
+            currentFrame.fitHeight = imageHeight.toDouble()
+            currentFrame.fitWidth = imageWidth.toDouble()
         }
 
+        // gray image that will be update with the latest image
+        val grayImage = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
+
         // set up a timer that fetches a frame at the correct moment
-        frameTimer = vertx.setPeriodic((1000.0 / fps).toLong()) {
+        frameTimer = vertx.setPeriodic((1000.0 / grabber.frameRate).toLong()) {
             // timer fired, we should fetch another frame
-//            val grab = grabber.grabImage()
-//            val iplImage = converter.convertToIplImage(grab)
-            val image = converter2.convert(grabber.grabImage())
-//            val mat = converter.convert(grab)
+            val grabbedImage = grabber.grabImage()
+            val image = converter.convert(grabbedImage)
+
+            // create the gray image
+            cvtColor(grabbedImage.let { converterCV.convert(it) }, grayImage, CV_BGR2GRAY)
+                .also { cvtColor(grayImage, grayImage, CV_GRAY2BGR) }
+//            cvtColor(converterCV.convert(grabbedImage), grayImage, CV_BGR2GRAY)
 
             if (image.isError) {
                 println("image is error")
             } else {
                 // convert it to a frame
 //                println("image h ${image.height} w ${image.width}")
+
                 // render the image on FX thread
                 Platform.runLater {
-                    currentFrame.imageProperty().set(image)
-                    // currentFrame.image = image
-                    currentFrame.fitHeight = image.height
-                    currentFrame.fitWidth = image.width
+                    if (!showGrayImage) {
+                        currentFrame.imageProperty().set(image)
+                        toggleGrey.text = "Grey"
+                    } else {
+                        currentFrame.imageProperty().set(converter.convert(converterCV.convert(grayImage)))
+                        toggleGrey.text = "Colour"
+                    }
                 }
             }
         }
@@ -127,5 +149,9 @@ class Controller {
      */
     fun setClosed() {
         stopAcquisition()
+    }
+
+    fun toggleGrey(actionEvent: ActionEvent) {
+        showGrayImage = !showGrayImage
     }
 }
