@@ -1,17 +1,25 @@
 import javafx.application.Platform
+import javafx.collections.FXCollections
 import javafx.event.ActionEvent
 import javafx.fxml.FXML
+import javafx.fxml.Initializable
 import javafx.scene.control.Button
+import javafx.scene.control.ComboBox
+import javafx.scene.control.Slider
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.JavaFXFrameConverter
 import org.bytedeco.javacv.OpenCVFrameConverter
+import org.bytedeco.opencv.global.opencv_core.CV_32SC1
 import org.bytedeco.opencv.global.opencv_core.CV_8UC1
 import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.opencv_core.Mat
+import org.bytedeco.opencv.opencv_core.MatVector
+import org.bytedeco.opencv.opencv_core.Scalar
+import java.net.URL
+import java.util.*
 import java.util.concurrent.ScheduledExecutorService
-import javax.swing.Spring.height
 
 
 class Controller {
@@ -21,14 +29,19 @@ class Controller {
 
     // the FXML button
     @FXML
-    private lateinit var button: Button
+    private lateinit var toggleCamera: Button
 
     @FXML
     private lateinit var toggleGrey: Button
 
-    // the FXML image view
+    @FXML
+    private lateinit var displayMode: ComboBox<DISPLAY_MODE>
+
     @FXML
     private lateinit var currentFrame: ImageView
+
+    @FXML
+    private lateinit var thresholdSlider: Slider
 
     // a timer for acquiring the video stream
     private var timer: ScheduledExecutorService? = null
@@ -43,6 +56,26 @@ class Controller {
 
     // if null, no timer is running
     private var frameTimer: Long? = null
+
+    // what are we drawing?
+    enum class DISPLAY_MODE {
+        ORIGINAL, GRAY, CONTOUR
+    }
+
+    @FXML
+    fun initialize() {
+        println("Loaded the controller!")
+        println(toggleGrey.text)
+        println(displayMode == null)
+
+        val itemList = FXCollections.observableArrayList<DISPLAY_MODE>()
+        DISPLAY_MODE.values().forEach {
+            itemList.add(it)
+        }
+        displayMode.items = itemList
+        displayMode.selectionModel.select(DISPLAY_MODE.ORIGINAL)
+    }
+
 
     /**
      * The action triggered by pushing the button on the GUI
@@ -66,12 +99,15 @@ class Controller {
 //        grabber.format = "h264"
         grabber.start()
 
+
         // CanvasFrame, FrameGrabber, and FrameRecorder use Frame objects to communicate image data.
         // We need a FrameConverter to interface with other APIs (Android, Java 2D, JavaFX, Tesseract, OpenCV, etc).
         val converter = JavaFXFrameConverter()
         val converterCV = OpenCVFrameConverter.ToMat()
 
+//        org.bytedeco.opencv.global.opencv_imgproc.drawContours(org.bytedeco.opencv.opencv_core.Mat, org.bytedeco.opencv.opencv_core.GpuMatVector, int, org.bytedeco.opencv.opencv_core.Scalar)
         // print some info
+
         grabber.apply {
             println("uri: $cameraUri")
             println("framerate: ${this.videoFrameRate}")
@@ -86,45 +122,62 @@ class Controller {
         }
 
         // gray image that will be update with the latest image
-        val grayImage = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
+        val grayMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
+        val contourMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
+        val drawMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1)
 
         // set up a timer that fetches a frame at the correct moment
         frameTimer = vertx.setPeriodic((1000.0 / grabber.frameRate).toLong()) {
             // timer fired, we should fetch another frame
-            val grabbedImage = grabber.grabImage()
-            val image = converter.convert(grabbedImage)
+            grabber.grabImage()
+                .let { converterCV.convert(it) }
+                .apply {
+                    copyTo(drawMat)
+                    cvtColor(this, grayMat, CV_BGR2GRAY)
+                    grayMat.copyTo(contourMat)
+                }
 
+            val contours = MatVector()
+            threshold(contourMat, contourMat, 155.0, 255.0, CV_THRESH_BINARY);
+            findContours(grayMat, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE)
+            val n = contours.size()
+            for (i in 0 until n) {
+                val contour = contours[i]
+                val points = Mat()
+                approxPolyDP(contour, points, arcLength(contour, true) * 0.02, true)
+                drawContours(drawMat, MatVector(points), -1, Scalar.BLUE)
+            }
+
+            // ready to draw!
             // create the gray image
-            cvtColor(grabbedImage.let { converterCV.convert(it) }, grayImage, CV_BGR2GRAY)
-                .also { cvtColor(grayImage, grayImage, CV_GRAY2BGR) }
-//            cvtColor(converterCV.convert(grabbedImage), grayImage, CV_BGR2GRAY)
+            // go to GRAY and back to BGR so we can draw it on the same ImageView
+            if(displayMode.selectionModel.selectedItem == DISPLAY_MODE.ORIGINAL) {
 
+            } else {
+
+            }
+            if (true)
+                contourMat.copyTo(drawMat)
+            if (showGrayImage)
+                cvtColor(drawMat, drawMat, CV_BGR2GRAY)
+            val image = converter.convert(converterCV.convert(drawMat))
             if (image.isError) {
                 println("image is error")
             } else {
-                // convert it to a frame
-//                println("image h ${image.height} w ${image.width}")
-
                 // render the image on FX thread
                 Platform.runLater {
-                    if (!showGrayImage) {
-                        currentFrame.imageProperty().set(image)
-                        toggleGrey.text = "Grey"
-                    } else {
-                        currentFrame.imageProperty().set(converter.convert(converterCV.convert(grayImage)))
-                        toggleGrey.text = "Colour"
-                    }
+                    currentFrame.imageProperty().set(image)
                 }
             }
         }
 
         // update UI
-        button.text = "Stop"
+        toggleCamera.text = "Stop"
     }
 
     private fun stopAcquisition() {
         // toggle UI
-        button.text = "Start"
+        toggleCamera.text = "Start"
 
         // stop listening
         if (frameTimer != null)

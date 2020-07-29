@@ -8,6 +8,7 @@ import javafx.stage.WindowEvent
 
 class FxApplication : Application() {
 
+
     override fun start(primaryStage: Stage) {
         try {
             // load the FXML resource
