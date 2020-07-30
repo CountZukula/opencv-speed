@@ -2,23 +2,22 @@ import javafx.application.Platform
 import javafx.collections.FXCollections
 import javafx.event.ActionEvent
 import javafx.fxml.FXML
-import javafx.fxml.Initializable
+import javafx.scene.canvas.Canvas
 import javafx.scene.control.Button
 import javafx.scene.control.ComboBox
 import javafx.scene.control.Slider
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
+import org.bytedeco.javacv.CanvasFrame
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.JavaFXFrameConverter
 import org.bytedeco.javacv.OpenCVFrameConverter
-import org.bytedeco.opencv.global.opencv_core.CV_32SC1
-import org.bytedeco.opencv.global.opencv_core.CV_8UC1
+import org.bytedeco.opencv.global.opencv_core.*
 import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.opencv_core.Mat
 import org.bytedeco.opencv.opencv_core.MatVector
 import org.bytedeco.opencv.opencv_core.Scalar
-import java.net.URL
-import java.util.*
+import org.bytedeco.opencv.opencv_core.Size
 import java.util.concurrent.ScheduledExecutorService
 
 
@@ -33,6 +32,9 @@ class Controller {
 
     @FXML
     private lateinit var toggleGrey: Button
+
+    @FXML
+    private lateinit var canvasFrame: Canvas
 
     @FXML
     private lateinit var displayMode: ComboBox<DISPLAY_MODE>
@@ -59,15 +61,16 @@ class Controller {
 
     // what are we drawing?
     enum class DISPLAY_MODE {
-        ORIGINAL, GRAY, CONTOUR
+        ORIGINAL, GRAY, CONTOUR, DIFF, BLUR
+    }
+
+    // the known color spaces
+    enum class COLOR_SPACE {
+        BGR, GRAY
     }
 
     @FXML
     fun initialize() {
-        println("Loaded the controller!")
-        println(toggleGrey.text)
-        println(displayMode == null)
-
         val itemList = FXCollections.observableArrayList<DISPLAY_MODE>()
         DISPLAY_MODE.values().forEach {
             itemList.add(it)
@@ -119,56 +122,123 @@ class Controller {
             // change the image frame
             currentFrame.fitHeight = imageHeight.toDouble()
             currentFrame.fitWidth = imageWidth.toDouble()
+            canvasFrame.width = imageWidth.toDouble()
+            canvasFrame.height = imageHeight.toDouble()
         }
 
+
+        data class DrawableMat(val mat: Mat, val space: COLOR_SPACE, val timeMillis: Long = System.currentTimeMillis())
+
         // gray image that will be update with the latest image
-        val grayMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
-        val contourMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1)
-        val drawMat = Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1)
+        val grayMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+        // this will be initialised in the first frame with grayMat
+        val previousGrayMat: DrawableMat by lazy {
+            DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+                    .apply {
+                        grayMat.mat.copyTo(this.mat)
+                    }
+        }
+        val diffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+        val blurDiffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+        val contourMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+        val originalMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), COLOR_SPACE.BGR)
+
+        // this is the image that will be drawn on the GUI every frame
+        var toDraw = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), COLOR_SPACE.BGR)
+
+        // this helps us count frames per second
+        var fpsCounter = Counter()
 
         // set up a timer that fetches a frame at the correct moment
-        frameTimer = vertx.setPeriodic((1000.0 / grabber.frameRate).toLong()) {
+        val refreshTimer = (1000.0 / grabber.frameRate).toLong()
+        println("Refresh every ms: $refreshTimer")
+        frameTimer = vertx.setPeriodic(refreshTimer) {
             // timer fired, we should fetch another frame
             grabber.grabImage()
-                .let { converterCV.convert(it) }
-                .apply {
-                    copyTo(drawMat)
-                    cvtColor(this, grayMat, CV_BGR2GRAY)
-                    grayMat.copyTo(contourMat)
-                }
+                    .let {
+                        converterCV.convert(it)
+                    }
+                    .apply {
+                        // we save the frame to the 'original' version, full color
+                        this.copyTo(originalMat.mat)
+                    }
+
+            fpsCounter.inc()
+            if (fpsCounter.millisPassed() > 1000) {
+                println("FPS: ${fpsCounter.perSecond()}")
+                fpsCounter.reset()
+            }
+
+            // do calculations, preprocessing and setup moves
+            // create the gray scale image
+            cvtColor(originalMat.mat, grayMat.mat, CV_BGR2GRAY)
+            // ... and make a copy in the contour image
+            grayMat.mat.copyTo(contourMat.mat)
+
+            // absolute difference between this frame and the previous
+            absdiff(previousGrayMat.mat, grayMat.mat, diffMat.mat)
+            blur(diffMat.mat, blurDiffMat.mat, Size(10, 10))
+
 
             val contours = MatVector()
-            threshold(contourMat, contourMat, 155.0, 255.0, CV_THRESH_BINARY);
-            findContours(grayMat, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE)
+            threshold(contourMat.mat, contourMat.mat, thresholdSlider.value, thresholdSlider.max, CV_THRESH_BINARY);
+            findContours(grayMat.mat, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE)
             val n = contours.size()
             for (i in 0 until n) {
                 val contour = contours[i]
                 val points = Mat()
                 approxPolyDP(contour, points, arcLength(contour, true) * 0.02, true)
-                drawContours(drawMat, MatVector(points), -1, Scalar.BLUE)
+                drawContours(toDraw.mat, MatVector(points), -1, Scalar.BLUE)
+            }
+
+            // get ready for the next frame
+            grayMat.mat.copyTo(previousGrayMat.mat)
+
+            // pick which of the images we want to draw, any GUI post-processing will happen on top of this
+            // render the image on FX thread
+            toDraw = when (displayMode.selectionModel.selectedItem) {
+                DISPLAY_MODE.ORIGINAL -> {
+                    originalMat
+                }
+                DISPLAY_MODE.GRAY -> {
+                    grayMat
+                }
+                DISPLAY_MODE.CONTOUR -> {
+                    contourMat
+                }
+                DISPLAY_MODE.DIFF -> {
+                    diffMat
+                }
+                DISPLAY_MODE.BLUR -> {
+                    blurDiffMat
+                }
+                else -> {
+                    originalMat
+                }
+
+                // ready to draw!
+                // create the gray image
+                // go to GRAY and back to BGR so we can draw it on the same ImageView
             }
 
             // ready to draw!
             // create the gray image
             // go to GRAY and back to BGR so we can draw it on the same ImageView
-            if(displayMode.selectionModel.selectedItem == DISPLAY_MODE.ORIGINAL) {
-
-            } else {
-
+            if (toDraw.space == COLOR_SPACE.GRAY) {
+                cvtColor(toDraw.mat, toDraw.mat, CV_GRAY2BGR)
             }
-            if (true)
-                contourMat.copyTo(drawMat)
-            if (showGrayImage)
-                cvtColor(drawMat, drawMat, CV_BGR2GRAY)
-            val image = converter.convert(converterCV.convert(drawMat))
+
+            val image = converter.convert(converterCV.convert(toDraw.mat))
             if (image.isError) {
                 println("image is error")
             } else {
                 // render the image on FX thread
                 Platform.runLater {
-                    currentFrame.imageProperty().set(image)
+//                    currentFrame.imageProperty().set(image)
+                    canvasFrame.graphicsContext2D.drawImage(image, 0.0, 0.0)
                 }
             }
+
         }
 
         // update UI
@@ -180,8 +250,10 @@ class Controller {
         toggleCamera.text = "Start"
 
         // stop listening
-        if (frameTimer != null)
+        if (frameTimer != null) {
             vertx.cancelTimer(frameTimer!!)
+        }
+
         grabber.release()
     }
 
