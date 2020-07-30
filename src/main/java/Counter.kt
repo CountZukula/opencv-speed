@@ -22,4 +22,12 @@ class Counter {
         val secondsPassed = millisPassed().toDouble() / 1000
         return count / secondsPassed
     }
+
+    fun tick(resetAfterMillis: Long) {
+        inc()
+        if (millisPassed() > resetAfterMillis) {
+            println("counter: " + perSecond())
+            reset()
+        }
+    }
 }
