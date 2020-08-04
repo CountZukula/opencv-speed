@@ -23,6 +23,9 @@ class Counter {
         return count / secondsPassed
     }
 
+    /**
+     * Increase the counter, print and reset if the given time has passed.
+     */
     fun tick(resetAfterMillis: Long) {
         inc()
         if (millisPassed() > resetAfterMillis) {

@@ -1,4 +1,3 @@
-import io.reactivex.Observable
 import javafx.application.Platform
 import javafx.collections.FXCollections
 import javafx.event.ActionEvent
@@ -7,8 +6,8 @@ import javafx.scene.canvas.Canvas
 import javafx.scene.control.*
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
+import model.DrawableMat
 import org.bytedeco.javacv.FFmpegFrameGrabber
-import org.bytedeco.javacv.Frame
 import org.bytedeco.javacv.JavaFXFrameConverter
 import org.bytedeco.javacv.OpenCVFrameConverter
 import org.bytedeco.opencv.global.opencv_core.*
@@ -18,6 +17,7 @@ import org.bytedeco.opencv.opencv_core.MatVector
 import org.bytedeco.opencv.opencv_core.Scalar
 import org.bytedeco.opencv.opencv_core.Size
 import java.util.concurrent.ScheduledExecutorService
+import kotlin.system.measureTimeMillis
 
 
 class Controller {
@@ -66,10 +66,6 @@ class Controller {
         ORIGINAL, GRAY, CONTOUR, DIFF, BLUR
     }
 
-    // the known color spaces
-    enum class COLOR_SPACE {
-        BGR, GRAY
-    }
 
     @FXML
     fun initialize() {
@@ -151,24 +147,23 @@ class Controller {
             }
 
 
-            data class DrawableMat(val mat: Mat, val space: COLOR_SPACE, val timeMillis: Long = System.currentTimeMillis())
 
             // gray image that will be update with the latest image
-            val grayMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+            val grayMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
             // this will be initialised in the first frame with grayMat
             val previousGrayMat: DrawableMat by lazy {
-                DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
+                DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
                         .apply {
                             grayMat.mat.copyTo(this.mat)
                         }
             }
-            val diffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
-            val blurDiffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
-            val contourMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), COLOR_SPACE.GRAY)
-            val originalMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), COLOR_SPACE.BGR)
+            val diffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
+            val blurDiffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
+            val contourMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
+            val originalMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), ColorSpace.BGR)
 
             // this is the image that will be drawn on the GUI every frame
-            var toDraw = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), COLOR_SPACE.BGR)
+            var toDraw = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), ColorSpace.BGR)
 
 
             // set up a timer that fetches a frame at the correct moment
@@ -245,7 +240,7 @@ class Controller {
                 // ready to draw!
                 // create the gray image
                 // go to GRAY and back to BGR so we can draw it on the same ImageView
-                if (toDraw.space == COLOR_SPACE.GRAY) {
+                if (toDraw.space == ColorSpace.GRAY) {
                     cvtColor(toDraw.mat, toDraw.mat, CV_GRAY2BGR)
                 }
 
@@ -265,8 +260,12 @@ class Controller {
                     // render the image on FX thread
                     Platform.runLater {
 //                    currentFrame.imageProperty().set(image)
-                        canvasFrame.graphicsContext2D.drawImage(image, 0.0, 0.0)
-                        originalView.graphicsContext2D.drawImage(converter.convert(converterCV.convert(originalMat.mat)), 0.0, 0.0)
+                        measureTimeMillis {
+                            canvasFrame.graphicsContext2D.drawImage(image, 0.0, 0.0)
+                            originalView.graphicsContext2D.drawImage(converter.convert(converterCV.convert(originalMat.mat)), 0.0, 0.0)
+                        }.apply {
+                            println("Drawing took $this ms.")
+                        }
                     }
                 }
 
