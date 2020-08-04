@@ -2,7 +2,6 @@ import javafx.application.Platform
 import javafx.beans.property.ObjectProperty
 import javafx.embed.swing.SwingFXUtils
 import javafx.scene.image.Image
-import org.bytedeco.javacv.OpenCVFrameConverter
 import org.bytedeco.opencv.opencv_core.Mat
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
