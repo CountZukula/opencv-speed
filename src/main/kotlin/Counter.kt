@@ -1,6 +1,13 @@
 class Counter {
     var count = 0
     var start: Long = System.currentTimeMillis()
+    val millisPassed: Long
+        get() = System.currentTimeMillis() - start
+    val perSecond: Double
+        get() {
+            val secondsPassed = millisPassed.toDouble() / 1000
+            return count / secondsPassed
+        }
 
     /**
      * Reset the counter. Sets time to current and counter to 0.
@@ -16,20 +23,13 @@ class Counter {
         return this
     }
 
-    fun millisPassed(): Long = System.currentTimeMillis() - start
-
-    fun perSecond(): Double {
-        val secondsPassed = millisPassed().toDouble() / 1000
-        return count / secondsPassed
-    }
-
     /**
      * Increase the counter, print and reset if the given time has passed.
      */
     fun tick(resetAfterMillis: Long) {
         inc()
-        if (millisPassed() > resetAfterMillis) {
-            println("counter: " + perSecond())
+        if (millisPassed > resetAfterMillis) {
+            println("""per sec: $perSecond counter: $count millis passed: $millisPassed""")
             reset()
         }
     }

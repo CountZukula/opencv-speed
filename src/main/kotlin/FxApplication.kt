@@ -25,7 +25,7 @@ class FxApplication : Application() {
             // show the GUI
             primaryStage.show()
             // set the proper behavior on closing the application
-            val controller: RxController = loader.getController()
+            val controller: Controller = loader.getController()
             primaryStage.onCloseRequest = EventHandler<WindowEvent?> {
                 controller.setClosed()
             }

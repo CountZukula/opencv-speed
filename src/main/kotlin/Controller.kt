@@ -1,26 +1,34 @@
-import javafx.application.Platform
+import io.reactivex.Observable
+import io.reactivex.Single
+import io.reactivex.disposables.Disposable
+import io.reactivex.rxjavafx.schedulers.JavaFxScheduler
+import io.reactivex.schedulers.Schedulers
 import javafx.collections.FXCollections
+import javafx.embed.swing.SwingFXUtils
 import javafx.event.ActionEvent
 import javafx.fxml.FXML
 import javafx.scene.canvas.Canvas
-import javafx.scene.control.*
-import javafx.scene.image.Image
-import javafx.scene.image.ImageView
+import javafx.scene.control.Button
+import javafx.scene.control.ComboBox
+import javafx.scene.control.Slider
+import javafx.scene.control.Spinner
+import javafx.scene.image.*
 import model.DrawableMat
-import org.bytedeco.javacv.FFmpegFrameGrabber
-import org.bytedeco.javacv.JavaFXFrameConverter
-import org.bytedeco.javacv.OpenCVFrameConverter
-import org.bytedeco.opencv.global.opencv_core.*
+import model.Output
+import model.ProcessedFrame
+import org.bytedeco.javacv.*
+import org.bytedeco.opencv.global.opencv_core
+import org.bytedeco.opencv.global.opencv_imgproc
 import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.opencv_core.Mat
-import org.bytedeco.opencv.opencv_core.MatVector
-import org.bytedeco.opencv.opencv_core.Scalar
-import org.bytedeco.opencv.opencv_core.Size
+import java.awt.image.BufferedImage
+import java.nio.ByteBuffer
 import java.util.concurrent.ScheduledExecutorService
-import kotlin.system.measureTimeMillis
 
 
 class Controller {
+
+    private var subscription: Disposable? = null
 
     // this grabs our frames from the stream
     private lateinit var grabber: FFmpegFrameGrabber
@@ -39,7 +47,7 @@ class Controller {
     private lateinit var canvasFrame: Canvas
 
     @FXML
-    private lateinit var originalView: Canvas
+    private lateinit var originalView: ImageView
 
     @FXML
     private lateinit var displayMode: ComboBox<DISPLAY_MODE>
@@ -55,17 +63,10 @@ class Controller {
     // toggle to show color or gray image
     private var showGrayImage = false
 
-    // fps of the stream
-    private val fps = 30
-
-    // if null, no timer is running
-    private var frameTimer: Long? = null
-
     // what are we drawing?
     enum class DISPLAY_MODE {
         ORIGINAL, GRAY, CONTOUR, DIFF, BLUR
     }
-
 
     @FXML
     fun initialize() {
@@ -90,7 +91,7 @@ class Controller {
     @FXML
     private fun toggleCamera(event: ActionEvent?) {
 
-        if (frameTimer != null) {
+        if (subscription != null) {
             stopAcquisition()
         } else {
             startAcquisition()
@@ -98,195 +99,161 @@ class Controller {
     }
 
     private fun startAcquisition() {
-        // acquisition thread
-        val run = Runnable {
-            // set up the frame grabber
-            grabber = FFmpegFrameGrabber(cameraUri)
-//        grabber.format = "h264"
-            grabber.start()
+        println("startAcquisition starting")
+        // this helps us count frames per second
+        var fpsCounter = Counter()
 
-            // this helps us count frames per second
-            var fpsCounter = Counter()
+        // Two converters, two worlds.
+        val converterFX = JavaFXFrameConverter()
+        val converterCV = OpenCVFrameConverter.ToMat()
+        val converter2D = Java2DFrameConverter()
 
-            // get an Observable going for the frames served by the Pi
-//            val frameObservable = Observable.create<Frame> { observableEmitter ->
-//                while (true) {
-//                    val grabbedImage = grabber.grabImage()
-//                    if (grabbedImage == null)
-//                        break
-//                    observableEmitter.onNext(grabbedImage)
-//                }
-//                observableEmitter.onComplete()
-//            }
-//
-//            frameObservable.blockingForEach {
-//                println("got an image from the observable!")
-//            }
+        // create a buffer for the final image outputter
+        var matBuffer = Mat(600, 800, opencv_core.CV_8UC4)
+        var buffer: ByteBuffer = matBuffer.createBuffer()
+        val formatByte: WritablePixelFormat<ByteBuffer> = PixelFormat.getByteBgraPreInstance()
 
-            // CanvasFrame, FrameGrabber, and FrameRecorder use Frame objects to communicate image data.
-            // We need a FrameConverter to interface with other APIs (Android, Java 2D, JavaFX, Tesseract, OpenCV, etc).
-            val converter = JavaFXFrameConverter()
-            val converterCV = OpenCVFrameConverter.ToMat()
+        // execution is wrapped in a single so we can schedule easily
+        subscription = Single.just(this)
+                .observeOn(Schedulers.computation())
+                .map {
+                    // set up the frame grabber
+                    grabber = FFmpegFrameGrabber(cameraUri)
+                    println("Starting the frame grabber.")
+                    grabber.start()
+                    println("Started it.")
 
-//        org.bytedeco.opencv.global.opencv_imgproc.drawContours(org.bytedeco.opencv.opencv_core.Mat, org.bytedeco.opencv.opencv_core.GpuMatVector, int, org.bytedeco.opencv.opencv_core.Scalar)
-            // print some info
-
-            grabber.apply {
-                println("uri: $cameraUri")
-                println("framerate: ${this.videoFrameRate}")
-                println("has video: ${this.hasVideo()}")
-                println("has audio: ${this.hasAudio()}")
-                println("image height: $imageHeight")
-                println("image width: $imageWidth")
-
-                // change the image frame
-                canvasFrame.width = imageWidth.toDouble()
-                canvasFrame.height = imageHeight.toDouble()
-                originalView.width = imageWidth.toDouble()
-                originalView.height = imageHeight.toDouble()
-            }
-
-
-
-            // gray image that will be update with the latest image
-            val grayMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
-            // this will be initialised in the first frame with grayMat
-            val previousGrayMat: DrawableMat by lazy {
-                DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
-                        .apply {
-                            grayMat.mat.copyTo(this.mat)
-                        }
-            }
-            val diffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
-            val blurDiffMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
-            val contourMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_8UC1), ColorSpace.GRAY)
-            val originalMat = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), ColorSpace.BGR)
-
-            // this is the image that will be drawn on the GUI every frame
-            var toDraw = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, CV_32SC1), ColorSpace.BGR)
-
-
-            // set up a timer that fetches a frame at the correct moment
-            var refreshTimer = (1000.0 / grabber.frameRate).toLong()
-            println("Refresh every ms: $refreshTimer")
-
-            println("starting while")
-            while (true) {
-                val grabbedImage = grabber.grabImage()
-                if (grabbedImage == null) {
-                    println("got a null image :(")
-                    break
-                }
-                fpsCounter.inc()
-                if (fpsCounter.millisPassed() > 1000) {
-                    println("fps: ${fpsCounter.perSecond()}")
-                    fpsCounter.reset()
-                }
-
-                // timer fired, we should fetch another frame
-                grabbedImage
-                        .let {
-                            converterCV.convert(it)
-                        }
-                        .apply {
-                            // we save the frame to the 'original' version, full color
-                            this.copyTo(originalMat.mat)
-                        }
-
-
-                // do calculations, preprocessing and setup moves
-                // create the gray scale image
-                cvtColor(originalMat.mat, grayMat.mat, CV_BGR2GRAY)
-
-                // absolute difference between this frame and the previous
-                absdiff(previousGrayMat.mat, grayMat.mat, diffMat.mat)
-                blur(diffMat.mat, blurDiffMat.mat, Size(blurSpinner.value, blurSpinner.value))
-
-                // calculate contours
-                val contours = MatVector()
-                threshold(blurDiffMat.mat, contourMat.mat, thresholdSlider.value, thresholdSlider.max, CV_THRESH_BINARY);
-                findContours(contourMat.mat, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE)
-
-                // get ready for the next frame
-                grayMat.mat.copyTo(previousGrayMat.mat)
-
-                // pick which of the images we want to draw, any GUI post-processing will happen on top of this
-                // render the image on FX thread
-                toDraw = when (displayMode.selectionModel.selectedItem) {
-                    DISPLAY_MODE.ORIGINAL -> {
-                        originalMat
-                    }
-                    DISPLAY_MODE.GRAY -> {
-                        grayMat
-                    }
-                    DISPLAY_MODE.CONTOUR -> {
-                        contourMat
-                    }
-                    DISPLAY_MODE.DIFF -> {
-                        diffMat
-                    }
-                    DISPLAY_MODE.BLUR -> {
-                        blurDiffMat
-                    }
-                    else -> {
-                        originalMat
+                    // set up the canvas sizes and print some info
+                    grabber.apply {
+                        printGrabberInfo(this)
+                        // change the image frame
+                        canvasFrame.width = imageWidth.toDouble()
+                        canvasFrame.height = imageHeight.toDouble()
+                        originalView.fitWidth = imageWidth.toDouble()
+                        originalView.fitHeight = imageHeight.toDouble()
                     }
 
-                    // ready to draw!
-                    // create the gray image
-                    // go to GRAY and back to BGR so we can draw it on the same ImageView
-                }
-
-                // ready to draw!
-                // create the gray image
-                // go to GRAY and back to BGR so we can draw it on the same ImageView
-                if (toDraw.space == ColorSpace.GRAY) {
-                    cvtColor(toDraw.mat, toDraw.mat, CV_GRAY2BGR)
-                }
-
-                // draw the contours on the final image
-                val n = contours.size()
-                for (i in 0 until n) {
-                    val contour = contours[i]
-                    val points = Mat()
-                    approxPolyDP(contour, points, arcLength(contour, true) * 0.02, true)
-                    drawContours(toDraw.mat, MatVector(points), -1, Scalar.YELLOW)
-                }
-
-                val image = converter.convert(converterCV.convert(toDraw.mat))
-                if (image.isError) {
-                    println("image is error")
-                } else {
-                    // render the image on FX thread
-                    Platform.runLater {
-//                    currentFrame.imageProperty().set(image)
-                        measureTimeMillis {
-                            canvasFrame.graphicsContext2D.drawImage(image, 0.0, 0.0)
-                            originalView.graphicsContext2D.drawImage(converter.convert(converterCV.convert(originalMat.mat)), 0.0, 0.0)
-                        }.apply {
-                            println("Drawing took $this ms.")
-                        }
+                    JavaFxScheduler.platform().scheduleDirect {
+                        toggleCamera.text = "Started feed"
+                        toggleCamera.disableProperty().value = false
                     }
                 }
+                .flatMapObservable {
+                    // observable for the frames
+                    grabber.bufferedObservable()
+                }
+                // preprocess the frames
+                .map { mat ->
+                    // prepare the containers
+                    val gray = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, opencv_core.CV_8UC1), ColorSpace.GRAY)
+                    val original = DrawableMat(Mat(grabber.imageHeight, grabber.imageWidth, opencv_core.CV_32SC1), ColorSpace.BGR)
+                    // fill them up
+                    mat.copyTo(original.mat)
+                    cvtColor(original.mat, gray.mat, opencv_imgproc.CV_BGR2GRAY)
+                    // save it to output
+                    ProcessedFrame(
+                            original = original,
+                            gray = gray,
+                            toDraw = original // placeholder, can be changed later
+                    )
+                }
 
+                // pick the mat we want to draw
+                .map {
+                    val from = it.original
+                    val to = DrawableMat(Mat(), ColorSpace.BGR, from.timeMillis)
+                    from.mat.copyTo(to.mat)
+                    from.space = to.space
+                    it.toDraw = to
+                    // convert to color
+                    toColor(it.toDraw)
+                    it
+                }
+
+                // output is handled on the javafx thread, needs to be able to draw
+                .observeOn(JavaFxScheduler.platform())
+                .subscribe { output ->
+                    // count fps
+                    fpsCounter.tick(33)
+
+                    // draw the desired image
+//                    canvasFrame.graphicsContext2D.clearRect(0.0, 0.0, output.image.width, output.image.height)
+//                    canvasFrame.graphicsContext2D.drawImage(output.image, 0.0, 0.0)
+//                    canvasFrame.graphicsContext2D.save()
+
+                    // try the direct buffer approach
+                    cvtColor(output.toDraw.mat, matBuffer, COLOR_BGR2BGRA)
+                    val pb = PixelBuffer(matBuffer.arrayWidth(), matBuffer.arrayHeight(), buffer, formatByte)
+                    val wi = WritableImage(pb)
+
+                    originalView.image = wi
+
+//                    cvPyrMeanShiftFiltering()
+
+
+                }
+        toggleCamera.text = "Starting feed"
+        toggleCamera.disableProperty().value = true
+        println("startAcquisition done")
+    }
+
+
+    /**
+     * Make sure that the given mat is in the BGR space.
+     */
+    private fun toColor(d: DrawableMat) {
+        // if it's grayscale, convert
+        if (d.space == ColorSpace.GRAY) {
+            cvtColor(d.mat, d.mat, opencv_imgproc.CV_GRAY2BGR)
+            d.space = ColorSpace.BGR
+        }
+    }
+
+    /**
+     * Pair each frame with the previous frame for easy access.
+     */
+    private fun pairPreviousAndCurrent(frames: Observable<Frame>): Observable<Array<Frame>>? {
+        // first put each frame together with its previous frame, for easy processing
+        return frames.scan(emptyArray<Frame>()) { previousAndCurrent: Array<Frame>, next: Frame ->
+            when {
+                previousAndCurrent.isEmpty() -> {
+                    arrayOf(next)
+                }
+                previousAndCurrent.size == 1 -> {
+                    arrayOf(previousAndCurrent[0], next)
+                }
+                else -> {
+                    arrayOf(previousAndCurrent[1], next)
+                }
             }
         }
-        // start it
-        Thread(run).start()
-        // update UI
-        toggleCamera.text = "Stop"
+    }
+
+    private fun printGrabberInfo(grabber: FFmpegFrameGrabber) {
+        grabber.apply {
+            println("uri: $cameraUri")
+            println("framerate: $videoFrameRate")
+            println("has video: ${hasVideo()}")
+            println("has audio: ${hasAudio()}")
+            println("image height: $imageHeight")
+            println("image width: $imageWidth")
+
+        }
     }
 
     private fun stopAcquisition() {
-        // toggle UI
-        toggleCamera.text = "Start"
-
-        // stop listening
-        if (frameTimer != null) {
-            vertx.cancelTimer(frameTimer!!)
+        // release grabber
+        if (grabber != null) {
+            grabber.release()
         }
 
-        grabber.release()
+        // stop the active subscription
+        if (subscription != null) {
+            subscription!!.dispose()
+        }
+
+        // toggle UI, be ready for the next run
+        toggleCamera.text = "Start"
     }
 
     /**
