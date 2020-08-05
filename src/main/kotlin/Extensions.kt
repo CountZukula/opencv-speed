@@ -4,6 +4,12 @@ import org.bytedeco.javacv.Frame
 import org.bytedeco.javacv.OpenCVFrameConverter
 import org.bytedeco.opencv.opencv_core.Mat
 import java.util.concurrent.TimeUnit
+import org.bytedeco.javacv.*
+import org.bytedeco.opencv.global.opencv_core
+import org.bytedeco.opencv.global.opencv_imgproc
+import org.bytedeco.opencv.global.opencv_imgproc.*
+import org.bytedeco.opencv.helper.opencv_core.RGB
+import org.bytedeco.opencv.opencv_core.MatVector
 
 /**
  * Create an Observable of Mat frames out of the grabber.
@@ -60,4 +66,12 @@ fun FFmpegFrameGrabber.bufferedObservable(): Observable<Mat> {
                     Observable.just(it.first).delay(drift, TimeUnit.MILLISECONDS)
                 }
             }
+}
+
+fun MatVector.asList(): List<Mat> {
+    val result = mutableListOf<Mat>()
+    for (i in 0 until this.size()) {
+        result.add(this[i])
+    }
+    return result
 }

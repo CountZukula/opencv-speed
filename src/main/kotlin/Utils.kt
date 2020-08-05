@@ -3,6 +3,7 @@ import javafx.beans.property.ObjectProperty
 import javafx.embed.swing.SwingFXUtils
 import javafx.scene.image.Image
 import org.bytedeco.opencv.opencv_core.Mat
+import org.bytedeco.opencv.opencv_core.MatVector
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
 
@@ -56,4 +57,5 @@ object Utils {
         System.arraycopy(sourcePixels, 0, targetPixels, 0, sourcePixels.size)
         return image
     }
+
 }
