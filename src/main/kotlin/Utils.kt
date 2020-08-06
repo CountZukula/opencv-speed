@@ -1,25 +1,11 @@
 import javafx.application.Platform
 import javafx.beans.property.ObjectProperty
-import javafx.embed.swing.SwingFXUtils
-import javafx.scene.image.Image
 import org.bytedeco.opencv.opencv_core.Mat
-import org.bytedeco.opencv.opencv_core.MatVector
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
 
 
 object Utils {
-
-    /**
-     * Convert a Mat object (OpenCV) in the corresponding Image for JavaFX
-     *
-     * @param frame
-     * the [Mat] representing the current frame
-     * @return the [Image] to show
-     */
-    fun mat2Image(frame: Mat): Image {
-        return SwingFXUtils.toFXImage(matToBufferedImage(frame), null)
-    }
 
     /**
      * Generic method for putting element running on a non-JavaFX thread on the
@@ -31,7 +17,9 @@ object Utils {
      * the value to set for the given [ObjectProperty]
      */
     fun <T> onFXThread(property: ObjectProperty<T>, value: T) {
-        Platform.runLater({ property.set(value) })
+        Platform.runLater {
+            property.set(value)
+        }
     }
 
     /**

@@ -2,14 +2,13 @@ import io.reactivex.Observable
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.Frame
 import org.bytedeco.javacv.OpenCVFrameConverter
-import org.bytedeco.opencv.opencv_core.Mat
 import java.util.concurrent.TimeUnit
 import org.bytedeco.javacv.*
 import org.bytedeco.opencv.global.opencv_core
 import org.bytedeco.opencv.global.opencv_imgproc
 import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.helper.opencv_core.RGB
-import org.bytedeco.opencv.opencv_core.MatVector
+import org.bytedeco.opencv.opencv_core.*
 
 /**
  * Create an Observable of Mat frames out of the grabber.
@@ -75,3 +74,12 @@ fun MatVector.asList(): List<Mat> {
     }
     return result
 }
+
+fun Rect.intersects(br: Rect): Boolean =
+        br.contains(tl()) || br.contains(tr()) || br.contains(bl()) || br.contains(br())
+                || contains(br.tl()) || contains(br.tr()) || contains(br.bl()) || contains(br.br())
+
+fun Rect.tr(): Point = Point(x() + width(), y())
+fun Rect.bl(): Point = Point(0, y() + height())
+
+fun Rect2d.toRect(): Rect = Rect(x().toInt(), y().toInt(), width().toInt(), height().toInt())

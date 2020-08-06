@@ -103,6 +103,7 @@ class ControllerSequential {
             // Two converters, two worlds.
             val converterFX = JavaFXFrameConverter()
             val converterCV = OpenCVFrameConverter.ToMat()
+            val converterOrgOpenCV = OpenCVFrameConverter.ToOrgOpenCvCoreMat()
             val converter2D = Java2DFrameConverter()
 
             // set up the frame grabber
@@ -155,7 +156,7 @@ class ControllerSequential {
             }
 
             // tracks that we want to keep
-            val tracks = mutableListOf<Rect>()
+            val tracks = mutableListOf<Track>()
 
             // start grabbing frames
             while (true) {
@@ -170,7 +171,7 @@ class ControllerSequential {
                 mat.copyTo(mats.draw.mat)
 
                 // count fps
-                fpsCounter.tick(33)
+//                fpsCounter.tick(33)
 
                 // do the processing
                 drawGrid(mats.draw, 100)
@@ -184,6 +185,27 @@ class ControllerSequential {
                 val contours = MatVector()
                 findContours(mats.threshold.mat, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)
 
+                // remove old tracks
+                tracks.removeIf { track ->
+                    track.lastUpdated < System.currentTimeMillis() - 10000
+                }
+
+                // before we look for new candidates, check our existing tracks
+                // find, for each track, the next likely matching rectangle
+                tracks.forEach { track ->
+                    val cvMat = org.opencv.core.Mat(mats.draw.mat.address())
+                    val updated = track.update()
+                }
+
+                // draw the tracks
+                tracks.forEach { track ->
+                    val color = randomColor()
+                    // draw the entire track in the same color
+                    track.brs.forEach { rect ->
+                        rectangle(mats.draw.mat, rect, color)
+                    }
+                }
+
                 // determine the largest contour
                 val biggestContour = contours.asList().maxBy { boundingRect(it).area() }
                 if (biggestContour != null) {
@@ -192,25 +214,19 @@ class ControllerSequential {
                     rectangle(mats.draw.mat, br, Scalar.RED)
                     putText(mats.draw.mat, "area ${br.area()}", br.tl(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar.GREEN)
                     // make sure we're not overlapping with an existing track
-                    if (br.area() > minimumContourBoundingArea) {
+                    // also, just do one track for now
+                    if (br.area() > minimumContourBoundingArea && tracks.size<1) {
                         // might be a nice track start
-                        // check if there's an overlap
-
-                        val overlapExists = tracks.any { it.intersects(br) }
+                        // check if there's an overlap with the last frame of a track
+                        val overlapExists = tracks.any { it.brs.last().intersects(br) }
                         if (!overlapExists) {
-                            tracks.add(br)
+                            tracks.add(Track(br, mats.original.mat))
                         }
                     }
                 }
 
-                // draw the tracks
-                tracks.forEach {
-                    rectangle(mats.draw.mat, it, Scalar.GREEN)
-                }
-
 
                 // try the direct buffer approach
-                println("going to draw to matbuffer")
                 cvtColor(mats.draw.mat, matBuffer, COLOR_BGR2BGRA)
                 val pb = PixelBuffer(matBuffer.arrayWidth(), matBuffer.arrayHeight(), buffer, formatByte)
                 val wi = WritableImage(pb)
@@ -225,7 +241,7 @@ class ControllerSequential {
                 // - >0 means the host should wait, delay the emission (drift)
                 // - <0 means the frame should already be out there, just output it
                 val drift = sourceDiff - hostDiff
-                println("hostDiff $hostDiff sourceDiff $sourceDiff drift $drift")
+//                println("hostDiff $hostDiff sourceDiff $sourceDiff drift $drift")
                 if (drift > 0) {
                     Thread.sleep(drift)
                 }
@@ -353,9 +369,7 @@ class ControllerSequential {
     }
 }
 
-private fun Rect.intersects(br: Rect): Boolean {
-    return br.contains(tl()) || br.contains(tr()) || br.contains(bl()) || br.contains(br())
+fun Rect.toRect2d(): Rect2d {
+    return Rect2d(x().toDouble(), y().toDouble(), width().toDouble(), height().toDouble())
 }
 
-private fun Rect.tr(): Point = Point(x() + width(), y())
-private fun Rect.bl(): Point = Point(0, y() + height())
