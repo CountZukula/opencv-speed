@@ -5,10 +5,8 @@ import javafx.application.Platform
 import javafx.collections.FXCollections
 import javafx.event.ActionEvent
 import javafx.fxml.FXML
-import javafx.scene.canvas.Canvas
 import javafx.scene.control.Button
 import javafx.scene.control.ComboBox
-import javafx.scene.control.Slider
 import javafx.scene.control.Spinner
 import javafx.scene.image.*
 import model.DrawableMat
@@ -16,12 +14,14 @@ import org.bytedeco.javacv.*
 import org.bytedeco.opencv.global.opencv_core
 import org.bytedeco.opencv.global.opencv_imgproc
 import org.bytedeco.opencv.global.opencv_imgproc.*
-import org.bytedeco.opencv.helper.opencv_core.RGB
 import org.bytedeco.opencv.opencv_core.*
+import java.math.RoundingMode
 import java.nio.ByteBuffer
+import java.text.DecimalFormat
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
+import kotlin.math.abs
+import kotlin.math.round
 
 
 class ControllerSequential {
@@ -51,7 +51,7 @@ class ControllerSequential {
     private lateinit var displayMode: ComboBox<DISPLAY_MODE>
 
     @FXML
-    private lateinit var thresholdSlider: Slider
+    private lateinit var thresholdSpinner: Spinner<Double>
 
     // a timer for acquiring the video stream
     private var timer: ScheduledExecutorService? = null
@@ -107,6 +107,10 @@ class ControllerSequential {
             val converterOrgOpenCV = OpenCVFrameConverter.ToOrgOpenCvCoreMat()
             val converter2D = Java2DFrameConverter()
 
+            // configuration variables
+            // TODO move these to a config file
+            val maximumActiveTracks = 5
+
             // set up the frame grabber
             grabber = FFmpegFrameGrabber(cameraUri)
             println("Starting the frame grabber.")
@@ -123,6 +127,7 @@ class ControllerSequential {
                 originalView.fitHeight = imageHeight.toDouble()
             }
 
+
             // create a buffer for the final image outputter
             var matBuffer = Mat(grabber.imageHeight, grabber.imageWidth, opencv_core.CV_8UC4)
             var buffer: ByteBuffer = matBuffer.createBuffer()
@@ -138,6 +143,7 @@ class ControllerSequential {
             // keep track of the current time and the time of the source material
             val firstFrame = TimeUnit.MILLISECONDS.convert(grabber.grabImage().timestamp, TimeUnit.MICROSECONDS)
             val firstTime = System.currentTimeMillis()
+
 
             // all the matrices we need
             val mats = object {
@@ -156,8 +162,19 @@ class ControllerSequential {
                 cvtColor(mat, mats.previousGray.mat, CV_BGR2GRAY)
             }
 
+            // entry and exit rectangles (left and right portion of the image in which no tracking occurs and where tracks are being removed)
+            val exitWidthPercentage = 0.05
+            val leftExit = Rect(grabber.imageRect().tl(), Point((grabber.imageWidth * exitWidthPercentage).toInt(), grabber.imageHeight))
+            val rightExit = Rect(Point(grabber.imageWidth - (grabber.imageWidth * exitWidthPercentage).toInt(), 0), grabber.imageRect().br())
+            // divide the whole image in quarts
+            val q1 = Rect(Point((grabber.imageWidth * 0.0).toInt(), 0), Point((grabber.imageWidth * 0.25).toInt(), grabber.imageHeight))
+            val q2 = Rect(Point((grabber.imageWidth * 0.25).toInt(), 0), Point((grabber.imageWidth * 0.50).toInt(), grabber.imageHeight))
+            val q3 = Rect(Point((grabber.imageWidth * 0.50).toInt(), 0), Point((grabber.imageWidth * 0.75).toInt(), grabber.imageHeight))
+            val q4 = Rect(Point((grabber.imageWidth * 0.75).toInt(), 0), Point((grabber.imageWidth * 1.0).toInt(), grabber.imageHeight))
+
             // tracks that we want to keep
             val tracks = mutableListOf<Track>()
+            val speedTracks = mutableListOf<Track>()
 
             // start grabbing frames
             while (true) {
@@ -171,9 +188,6 @@ class ControllerSequential {
                 cvtColor(mats.original.mat, mats.gray.mat, CV_BGR2GRAY)
                 mat.copyTo(mats.draw.mat)
 
-                // count fps
-//                fpsCounter.tick(33)
-
                 // do the processing
                 drawGrid(mats.draw, 100)
                 // 0,0 is top left
@@ -182,20 +196,32 @@ class ControllerSequential {
                 // do contour detection
                 opencv_core.absdiff(mats.previousGray.mat, mats.gray.mat, mats.diff.mat)
                 blur(mats.diff.mat, mats.blurDiff.mat, Size(10, 10))
-                threshold(mats.blurDiff.mat, mats.threshold.mat, thresholdSlider.value, 255.0, THRESH_BINARY)
+                threshold(mats.blurDiff.mat, mats.threshold.mat, thresholdSpinner.value, 255.0, THRESH_BINARY)
                 val contours = MatVector()
                 findContours(mats.threshold.mat, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)
 
                 // remove old tracks
                 tracks.removeIf { track ->
-                    track.lastUpdated < System.currentTimeMillis() - 10000
+                    // 10 seconds old tracks are
+                    val shouldRemove = !track.active || track.brs.last().intersects(leftExit) || track.brs.last().intersects(rightExit)
+                    if (shouldRemove) {
+                        println("going to remove a track! ${System.currentTimeMillis() - track.lastUpdated}ms since last update")
+                        track.end()
+                    }
+
+                    // if the track should be removed, check if it's a valid speed measurement track
+                    if (shouldRemove && isValidSpeedTrack(track, q1, q4)) {
+                        speedTracks.add(track)
+                    }
+
+                    shouldRemove
                 }
 
                 // before we look for new candidates, check our existing tracks
                 // find, for each track, the next likely matching rectangle
                 tracks.forEach { track ->
-                    val cvMat = org.opencv.core.Mat(mats.draw.mat.address())
-                    val updated = track.update()
+//                    val cvMat = org.opencv.core.Mat(mats.draw.mat.address())
+                    track.update()
                 }
 
                 // draw the tracks
@@ -205,14 +231,30 @@ class ControllerSequential {
                     track.brs.first().apply { rectangle(mats.draw.mat, this, track.color) }
                     track.brs.last().apply { rectangle(mats.draw.mat, this, track.color) }
                 }
+                speedTracks.forEach { track ->
+                    track.brs.first().apply { rectangle(mats.draw.mat, this, track.color, 2, LINE_4, 0) }
+                    track.brs.last().apply { rectangle(mats.draw.mat, this, track.color, 2, LINE_4, 0) }
+                    round(3.0)
+                    val df = DecimalFormat("#.##")
+                    df.roundingMode = RoundingMode.CEILING
+                    // draw the speed!
+                    putText(mats.draw.mat, "${df.format(track.speedPixels())}px/ms", track.brs.last().tl().moveY(10).moveX(10), FONT_HERSHEY_SIMPLEX, 0.4, track.color)
+                    putText(mats.draw.mat, "${df.format(track.age)}ms", track.brs.last().tl().moveX(10).moveY(20), FONT_HERSHEY_SIMPLEX, 0.4, track.color)
+                }
+
+                // draw the largest contour's bounding rectangle
+                val biggestContour = contours.asList().maxBy { boundingRect(it).area() }
+                if (biggestContour != null) {
+                    drawRectangle(mats.draw.mat, boundingRect(biggestContour), Scalar.YELLOW)
+                }
 
                 // determine the largest contour
                 // this might add a new track, so only do it if we didn't reach our maximum track amount
                 if (tracks.size < 4) {
                     val biggestContour = contours.asList().maxBy { boundingRect(it).area() }
-                    if (biggestContour != null) {
+                    if (isGoodTrackStart(biggestContour, leftExit, rightExit, minimumContourBoundingArea) && tracks.size < maximumActiveTracks) {
                         val br = boundingRect(biggestContour)
-                        println("biggest contour area: " + br.area())
+                        println("start of track, area: " + br.area())
                         rectangle(mats.draw.mat, br, Scalar.RED)
                         putText(mats.draw.mat, "area ${br.area()}", br.tl(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar.GREEN)
                         // make sure we're not overlapping with an existing track
@@ -227,6 +269,13 @@ class ControllerSequential {
                         }
                     }
                 }
+
+                // draw info
+                addInfo(mat = mats.draw.mat, fps = fpsCounter.perSecond, tracks = tracks)
+
+                // draw exit rectangles
+                drawRectangle(mats.draw.mat, leftExit)
+                drawRectangle(mats.draw.mat, rightExit)
 
 
                 // try the direct buffer approach
@@ -252,6 +301,9 @@ class ControllerSequential {
 
                 // keep a copy of the current gray scale image in the previous grayscale image so we can perform contour detection
                 mats.apply { gray.mat.copyTo(previousGray.mat) }
+
+                // keep track of fps
+                fpsCounter.tick(resetAfterMillis = 1000, print = false)
             }
         }
         Thread(run).start()
@@ -261,10 +313,36 @@ class ControllerSequential {
         println("startAcquisition done")
     }
 
-    private fun drawRectangle(draw: Mat, p1: Rect) {
-        rectangle(draw, p1, Scalar.RED)
+    private fun isValidSpeedTrack(track: Track, q1: Rect, q4: Rect): Boolean {
+        // we need sufficient measurements
+        if (track.brs.size < 5)
+            return false
+        // check if the first and last are on opposite sides of the image
+        return (track.brs.first().intersects(q1) && track.brs.last().intersects(q4)) ||
+                (track.brs.first().intersects(q4) && track.brs.last().intersects(q1))
     }
 
+    private fun isGoodTrackStart(biggestContour: Mat?, leftExit: Rect, rightExit: Rect, minimumContourBoundingArea: Int): Boolean =
+            if (biggestContour == null) {
+                false
+            } else {
+                val br = boundingRect(biggestContour)
+                !br.intersects(leftExit) && !br.intersects(rightExit) && (br.area() >= minimumContourBoundingArea)
+            }
+
+    private fun addInfo(mat: Mat, fps: Double, tracks: MutableList<Track>) {
+        var y = 10
+        val x = 5
+        val lineHeight = 7
+        putText(mat, "fps $fps",
+                Point(x, y.also { y += lineHeight }), FONT_HERSHEY_SIMPLEX, 0.4, Scalar.BLUE)
+        putText(mat, "#tracks ${tracks.size}",
+                Point(x, y.also { y += lineHeight }), FONT_HERSHEY_SIMPLEX, 0.4, Scalar.BLUE)
+    }
+
+    private fun drawRectangle(draw: Mat, p1: Rect, color: Scalar = Scalar.RED) {
+        rectangle(draw, p1, color)
+    }
 
     private fun drawGrid(draw: DrawableMat, step: Int) {
         for (i in 0..draw.mat.arrayHeight() step step) {
@@ -370,6 +448,7 @@ class ControllerSequential {
         }
     }
 }
+
 
 fun Rect.toRect2d(): Rect2d {
     return Rect2d(x().toDouble(), y().toDouble(), width().toDouble(), height().toDouble())

@@ -26,10 +26,11 @@ class Counter {
     /**
      * Increase the counter, print and reset if the given time has passed.
      */
-    fun tick(resetAfterMillis: Long) {
+    fun tick(resetAfterMillis: Long, print: Boolean = true) {
         inc()
         if (millisPassed > resetAfterMillis) {
-            println("""per sec: $perSecond counter: $count millis passed: $millisPassed""")
+            if (print)
+                println("""per sec: $perSecond counter: $count millis passed: $millisPassed""")
             reset()
         }
     }

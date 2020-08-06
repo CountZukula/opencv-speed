@@ -4,7 +4,6 @@ import io.reactivex.disposables.Disposable
 import io.reactivex.rxjavafx.schedulers.JavaFxScheduler
 import io.reactivex.schedulers.Schedulers
 import javafx.collections.FXCollections
-import javafx.embed.swing.SwingFXUtils
 import javafx.event.ActionEvent
 import javafx.fxml.FXML
 import javafx.scene.canvas.Canvas
@@ -14,14 +13,12 @@ import javafx.scene.control.Slider
 import javafx.scene.control.Spinner
 import javafx.scene.image.*
 import model.DrawableMat
-import model.Output
 import model.ProcessedFrame
 import org.bytedeco.javacv.*
 import org.bytedeco.opencv.global.opencv_core
 import org.bytedeco.opencv.global.opencv_imgproc
 import org.bytedeco.opencv.global.opencv_imgproc.*
 import org.bytedeco.opencv.opencv_core.Mat
-import java.awt.image.BufferedImage
 import java.nio.ByteBuffer
 import java.util.concurrent.ScheduledExecutorService
 
@@ -174,7 +171,7 @@ class Controller {
                 .observeOn(JavaFxScheduler.platform())
                 .subscribe { output ->
                     // count fps
-                    fpsCounter.tick(33)
+                    fpsCounter.tick(33, false)
 
                     // draw the desired image
 //                    canvasFrame.graphicsContext2D.clearRect(0.0, 0.0, output.image.width, output.image.height)

@@ -1,4 +1,6 @@
 import io.reactivex.Observable
+import javafx.geometry.Point2D
+import javafx.geometry.Rectangle2D
 import org.bytedeco.javacv.FFmpegFrameGrabber
 import org.bytedeco.javacv.Frame
 import org.bytedeco.javacv.OpenCVFrameConverter
@@ -75,11 +77,18 @@ fun MatVector.asList(): List<Mat> {
     return result
 }
 
-fun Rect.intersects(br: Rect): Boolean =
-        br.contains(tl()) || br.contains(tr()) || br.contains(bl()) || br.contains(br())
-                || contains(br.tl()) || contains(br.tr()) || contains(br.bl()) || contains(br.br())
+fun Rect.intersects(br: Rect): Boolean = this.toRectangle2D().intersects(br.toRectangle2D())
+
+fun Rect.toRectangle2D(): Rectangle2D = Rectangle2D(x().toDouble(), y().toDouble(), width().toDouble(), height().toDouble())
 
 fun Rect.tr(): Point = Point(x() + width(), y())
 fun Rect.bl(): Point = Point(0, y() + height())
+fun Rect.center() = Point(x() + width() / 2, y() + height() / 2)
+
+fun Point.moveY(offset: Int): Point = Point(x(), y() + offset)
+fun Point.moveX(offset: Int): Point = Point(x() + offset, y())
+fun Point.toPoint2D()  = Point2D(x().toDouble(), y().toDouble())
 
 fun Rect2d.toRect(): Rect = Rect(x().toInt(), y().toInt(), width().toInt(), height().toInt())
+
+fun FFmpegFrameGrabber.imageRect(): Rect = Rect(0, 0, imageWidth, imageHeight)

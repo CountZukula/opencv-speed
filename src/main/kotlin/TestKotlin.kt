@@ -1,7 +1,5 @@
-import io.reactivex.Observable
 import io.vertx.reactivex.core.Vertx
 import org.bytedeco.javacv.FFmpegFrameGrabber
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -19,7 +17,7 @@ fun observable() {
     grabber
             .bufferedObservable()
             .subscribe {
-                counter.tick(30)
+                counter.tick(30, false)
             }
     Thread.sleep(200000)
 }

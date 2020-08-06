@@ -1,34 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import javafx.scene.canvas.*?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.image.*?>
 <?import javafx.scene.layout.*?>
 
-<BorderPane prefHeight="276.0" prefWidth="500.0" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="ControllerSequential">
+<BorderPane prefHeight="276.0" prefWidth="500.0" xmlns="http://javafx.com/javafx/11.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="ControllerSequential">
     <bottom>
         <HBox prefHeight="22.0" prefWidth="200.0" BorderPane.alignment="CENTER" />
     </bottom>
     <right>
         <HBox prefHeight="100.0" prefWidth="200.0" BorderPane.alignment="CENTER">
             <children>
-                <Button mnemonicParsing="false" prefHeight="263.0" prefWidth="29.0" text="&gt;" />
-                <VBox prefHeight="250.0" prefWidth="184.0">
-                    <children>
-                        <Button fx:id="toggleCamera" alignment="center" onAction="#toggleCamera" prefHeight="26.0" prefWidth="188.0" text="Start Camera" />
-                        <Button fx:id="toggleGrey" alignment="center" onAction="#toggleGrey" prefHeight="26.0" prefWidth="178.0" text="Grey" />
-                        <Label text="Visualisation mode" />
-                        <ComboBox fx:id="displayMode" prefWidth="150.0" />
-                        <Label text="Threshold" />
-                        <Slider fx:id="thresholdSlider" max="255.0" prefHeight="27.0" prefWidth="140.0" value="150.0" />
-                        <Label text="Blur size" />
-                        <Spinner fx:id="blurSpinner" editable="true">
-                            <valueFactory>
-                                <SpinnerValueFactory.IntegerSpinnerValueFactory initialValue="10" max="200" min="0" />
-                            </valueFactory>
-                        </Spinner>
-                    </children>
-                </VBox>
+            <ScrollPane>
+               <content>
+                      <VBox prefHeight="250.0" prefWidth="184.0">
+                          <children>
+                              <Button fx:id="toggleCamera" alignment="center" onAction="#toggleCamera" prefHeight="26.0" prefWidth="188.0" text="Start Camera" />
+                              <Button fx:id="toggleGrey" alignment="center" onAction="#toggleGrey" prefHeight="26.0" prefWidth="178.0" text="Grey" />
+                              <Label text="Visualisation mode" />
+                              <ComboBox fx:id="displayMode" prefWidth="150.0" />
+                              <Label text="Threshold" />
+                              <Spinner fx:id="thresholdSpinner" editable="true">
+                                  <valueFactory>
+                                      <SpinnerValueFactory.IntegerSpinnerValueFactory initialValue="20" max="255" min="0" />
+                                  </valueFactory>
+                              </Spinner>
+                              <Label text="Blur size" />
+                              <Spinner fx:id="blurSpinner" editable="true">
+                                  <valueFactory>
+                                      <SpinnerValueFactory.IntegerSpinnerValueFactory initialValue="10" max="200" min="0" />
+                                  </valueFactory>
+                              </Spinner>
+                          </children>
+                      </VBox>
+               </content>
+            </ScrollPane>
             </children>
         </HBox>
     </right>
