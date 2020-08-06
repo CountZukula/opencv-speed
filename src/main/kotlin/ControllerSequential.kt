@@ -1,3 +1,4 @@
+import Utils.randomColor
 import io.reactivex.Observable
 import io.reactivex.disposables.Disposable
 import javafx.application.Platform
@@ -40,8 +41,8 @@ class ControllerSequential {
     @FXML
     private lateinit var toggleGrey: Button
 
-    @FXML
-    private lateinit var canvasFrame: Canvas
+//    @FXML
+//    private lateinit var canvasFrame: Canvas
 
     @FXML
     private lateinit var originalView: ImageView
@@ -116,8 +117,8 @@ class ControllerSequential {
             grabber.apply {
                 printGrabberInfo(this)
                 // change the image frame
-                canvasFrame.width = imageWidth.toDouble()
-                canvasFrame.height = imageHeight.toDouble()
+//                canvasFrame.width = imageWidth.toDouble()
+//                canvasFrame.height = imageHeight.toDouble()
                 originalView.fitWidth = imageWidth.toDouble()
                 originalView.fitHeight = imageHeight.toDouble()
             }
@@ -199,28 +200,30 @@ class ControllerSequential {
 
                 // draw the tracks
                 tracks.forEach { track ->
-                    val color = randomColor()
                     // draw the entire track in the same color
-                    track.brs.forEach { rect ->
-                        rectangle(mats.draw.mat, rect, color)
-                    }
+//                    track.brs.forEach { rect -> rectangle(mats.draw.mat, rect, track.color) }
+                    track.brs.first().apply { rectangle(mats.draw.mat, this, track.color) }
+                    track.brs.last().apply { rectangle(mats.draw.mat, this, track.color) }
                 }
 
                 // determine the largest contour
-                val biggestContour = contours.asList().maxBy { boundingRect(it).area() }
-                if (biggestContour != null) {
-                    val br = boundingRect(biggestContour)
-                    println("biggest contour area: " + br.area())
-                    rectangle(mats.draw.mat, br, Scalar.RED)
-                    putText(mats.draw.mat, "area ${br.area()}", br.tl(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar.GREEN)
-                    // make sure we're not overlapping with an existing track
-                    // also, just do one track for now
-                    if (br.area() > minimumContourBoundingArea && tracks.size<1) {
-                        // might be a nice track start
-                        // check if there's an overlap with the last frame of a track
-                        val overlapExists = tracks.any { it.brs.last().intersects(br) }
-                        if (!overlapExists) {
-                            tracks.add(Track(br, mats.original.mat))
+                // this might add a new track, so only do it if we didn't reach our maximum track amount
+                if (tracks.size < 4) {
+                    val biggestContour = contours.asList().maxBy { boundingRect(it).area() }
+                    if (biggestContour != null) {
+                        val br = boundingRect(biggestContour)
+                        println("biggest contour area: " + br.area())
+                        rectangle(mats.draw.mat, br, Scalar.RED)
+                        putText(mats.draw.mat, "area ${br.area()}", br.tl(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar.GREEN)
+                        // make sure we're not overlapping with an existing track
+                        // also, just do one track for now
+                        if (br.area() > minimumContourBoundingArea) {
+                            // might be a nice track start
+                            // check if there's an overlap with the last frame of a track
+                            val overlapExists = tracks.any { it.brs.last().intersects(br) }
+                            if (!overlapExists) {
+                                tracks.add(Track(br, mats.original.mat))
+                            }
                         }
                     }
                 }
@@ -262,7 +265,6 @@ class ControllerSequential {
         rectangle(draw, p1, Scalar.RED)
     }
 
-    private fun randomColor() = RGB(Random.nextDouble(256.0), Random.nextDouble(256.0), Random.nextDouble(256.0))
 
     private fun drawGrid(draw: DrawableMat, step: Int) {
         for (i in 0..draw.mat.arrayHeight() step step) {

@@ -1,3 +1,4 @@
+import Utils.randomColor
 import org.bytedeco.opencv.opencv_core.Mat
 import org.bytedeco.opencv.opencv_core.Rect
 import org.bytedeco.opencv.opencv_core.Rect2d
@@ -10,6 +11,7 @@ class Track(val br: Rect, val mat: Mat) {
     val tracker: TrackerCSRT = TrackerCSRT.create()
     var active = true
     var lastUpdated = System.currentTimeMillis()
+    val color = randomColor()
 
     init {
         tracker.init(mat, br.toRect2d())

@@ -1,8 +1,10 @@
 import javafx.application.Platform
 import javafx.beans.property.ObjectProperty
+import org.bytedeco.opencv.helper.opencv_core
 import org.bytedeco.opencv.opencv_core.Mat
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
+import kotlin.random.Random
 
 
 object Utils {
@@ -45,5 +47,7 @@ object Utils {
         System.arraycopy(sourcePixels, 0, targetPixels, 0, sourcePixels.size)
         return image
     }
+
+    fun randomColor() = opencv_core.RGB(Random.nextDouble(256.0), Random.nextDouble(256.0), Random.nextDouble(256.0))
 
 }
